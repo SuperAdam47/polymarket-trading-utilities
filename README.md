@@ -2,7 +2,7 @@
 
 Live Polymarket crypto up/down monitor — order book and trade feed for short-interval markets.
 
-**Made by [AdamBoris](https://github.com/AdamBoris)**
+**Made by Boris ([@SuperAdam47](https://github.com/SuperAdam47))**
 
 ## Features
 
