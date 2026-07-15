@@ -2,7 +2,6 @@ export type WalletAddress = `0x${string}`
 
 export const GAMMA_API_URL =
   import.meta.env.VITE_GAMMA_API_URL ?? 'https://gamma-api.polymarket.com'
-
 export const DATA_API_URL =
   import.meta.env.VITE_DATA_API_URL ?? 'https://data-api.polymarket.com'
 
@@ -34,3 +33,4 @@ export function tryGetWalletAddress(): WalletAddress | null {
   if (!addr || !/^0x[a-fA-F0-9]{40}$/.test(addr)) return null
   return addr as WalletAddress
 }
+

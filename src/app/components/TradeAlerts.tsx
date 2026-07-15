@@ -51,14 +51,12 @@ export function TradeAlerts({ trades, whaleThreshold }: TradeAlertsProps) {
         ) : (
           trades.map((trade) => {
             const isWhale = trade.usdValue >= whaleThreshold
-            const fillPanel = trades.length > 1
 
             return (
               <div
                 key={trade.id}
                 className={cn(
-                  'w-full min-w-0',
-                  fillPanel ? 'min-h-7 flex-1' : 'h-7 shrink-0',
+                  'h-7 w-full min-w-0 shrink-0',
                   trade.side === 'BUY'
                     ? isWhale
                       ? 'bg-violet-600'

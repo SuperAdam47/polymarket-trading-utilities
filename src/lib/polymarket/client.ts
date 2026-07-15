@@ -5,7 +5,6 @@ export const gammaClient = axios.create({
   baseURL: GAMMA_API_URL,
   timeout: 30000,
 })
-
 export const dataClient = axios.create({
   baseURL: DATA_API_URL,
   timeout: 30000,
@@ -20,3 +19,4 @@ export const lbClient = axios.create({
   baseURL: LB_API_URL,
   timeout: 30000,
 })
+
