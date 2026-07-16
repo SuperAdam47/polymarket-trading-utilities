@@ -133,13 +133,43 @@ export async function fetchCurrentMarket(
   const current = await fetchBySlug(`${prefix}${ts}`, selection)
   if (current) return current
 
-  return fetchBySlug(`${prefix}${ts + intervalSec}`, selection)
+  // Brief overlap at window boundaries — previous window may still be listed
+  const previous = await fetchBySlug(`${prefix}${ts - intervalSec}`, selection)
+  if (previous) return previous
+
+  return null
+}
+
+export async function fetchCurrentMarketWithRetry(
+  selection: MarketSelection,
+  attempts = 12,
+  delayMs = 1000
+): Promise<CryptoUpDownMarket | null> {
+  for (let i = 0; i < attempts; i += 1) {
+    const market = await fetchCurrentMarket(selection)
+    if (market) {
+      const expectedTs = getWindowTimestamp(selection.interval)
+      if (market.slug.endsWith(String(expectedTs))) return market
+      // Stale previous-window market — keep polling for the new one
+    }
+    if (i < attempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs))
+    }
+  }
+  return fetchCurrentMarket(selection)
 }
 
 export function msUntilNextWindow(interval: MarketInterval): number {
   const intervalSec = interval * 60
   const next = (getWindowTimestamp(interval) + intervalSec) * 1000
   return Math.max(0, next - Date.now())
+}
+
+export function formatTimeRemaining(ms: number): string {
+  const totalSec = Math.ceil(ms / 1000)
+  const min = Math.floor(totalSec / 60)
+  const sec = totalSec % 60
+  return `${min}:${sec.toString().padStart(2, '0')}`
 }
 
 // Backwards-compatible aliases

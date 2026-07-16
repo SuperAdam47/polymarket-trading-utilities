@@ -7,10 +7,10 @@ const isDev = !app.isPackaged
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 900,
-    height: 640,
-    minWidth: 700,
-    minHeight: 480,
+    width: 480,
+    height: 920,
+    minWidth: 400,
+    minHeight: 640,
     title: 'BTC 5m Monitor',
     backgroundColor: '#15191d',
     webPreferences: {

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   DEFAULT_MARKET_SELECTION,
   fetchCurrentMarket,
+  fetchCurrentMarketWithRetry,
+  getWindowTimestamp,
   msUntilNextWindow,
   selectionKey,
   type CryptoUpDownMarket,
@@ -27,6 +29,21 @@ async function fetchBookSnapshot(tokenId: string): Promise<OrderBookSnapshot> {
   return snapshotFromBook(data.bids ?? [], data.asks ?? [])
 }
 
+function applyMarketSnapshot(
+  m: CryptoUpDownMarket,
+  marketSlugRef: { current: string | null },
+  setters: {
+    setMarket: (m: CryptoUpDownMarket) => void
+    setTrades: (t: TradeEvent[]) => void
+  }
+): boolean {
+  const slugChanged = marketSlugRef.current !== m.slug
+  marketSlugRef.current = m.slug
+  setters.setMarket(m)
+  if (slugChanged) setters.setTrades([])
+  return slugChanged
+}
+
 export function useBtcMarketData() {
   const [selection, setSelection] = useState<MarketSelection>(
     DEFAULT_MARKET_SELECTION
@@ -39,8 +56,11 @@ export function useBtcMarketData() {
   const [connected, setConnected] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [timeRemainingMs, setTimeRemainingMs] = useState(0)
 
   const marketSlugRef = useRef<string | null>(null)
+  const windowTsRef = useRef(getWindowTimestamp(selection.interval))
+  const loadMarketRef = useRef<(() => Promise<void>) | null>(null)
 
   const selectMarket = useCallback((next: MarketSelection) => {
     setSelection((prev) => {
@@ -54,88 +74,142 @@ export function useBtcMarketData() {
     setConnected(false)
     setError(null)
     marketSlugRef.current = null
+    windowTsRef.current = getWindowTimestamp(next.interval)
   }, [])
 
-  const loadMarket = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const m = await fetchCurrentMarket(selection)
-      if (!m) {
-        setError(
-          `No active ${selection.asset.toUpperCase()} ${selection.interval}m market found`
-        )
-        setMarket(null)
-        setUpBook(null)
-        setDownBook(null)
-        setTrades([])
-        marketSlugRef.current = null
-        return
-      }
+  const loadMarket = useCallback(
+    async (opts?: { retry?: boolean }) => {
+      setLoading(true)
+      setError(null)
+      try {
+        const m = opts?.retry
+          ? await fetchCurrentMarketWithRetry(selection)
+          : await fetchCurrentMarket(selection)
 
-      if (marketSlugRef.current !== m.slug) {
-        marketSlugRef.current = m.slug
-        setMarket(m)
-        setTrades([])
+        if (!m) {
+          setError(
+            `No active ${selection.asset.toUpperCase()} ${selection.interval}m market found`
+          )
+          setMarket(null)
+          setUpBook(null)
+          setDownBook(null)
+          setTrades([])
+          marketSlugRef.current = null
+          return
+        }
 
-        const [upSnap, downSnap] = await Promise.all([
-          fetchBookSnapshot(m.upTokenId),
-          fetchBookSnapshot(m.downTokenId),
-        ])
-        setUpBook(upSnap)
-        setDownBook(downSnap)
-      } else {
-        setMarket(m)
+        const slugChanged = applyMarketSnapshot(m, marketSlugRef, {
+          setMarket,
+          setTrades,
+        })
+
+        if (slugChanged) {
+          const [upSnap, downSnap] = await Promise.all([
+            fetchBookSnapshot(m.upTokenId),
+            fetchBookSnapshot(m.downTokenId),
+          ])
+          setUpBook(upSnap)
+          setDownBook(downSnap)
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to load market')
+      } finally {
+        setLoading(false)
       }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load market')
-    } finally {
-      setLoading(false)
-    }
-  }, [selection])
+    },
+    [selection]
+  )
+
+  loadMarketRef.current = () => loadMarket()
 
   useEffect(() => {
     loadMarket()
-    const refresh = setInterval(loadMarket, 15_000)
-    const rotate = setInterval(() => {
-      const delay = msUntilNextWindow(selection.interval) + 2000
-      setTimeout(loadMarket, delay)
-    }, 30_000)
-    return () => {
-      clearInterval(refresh)
-      clearInterval(rotate)
+    const refresh = setInterval(() => loadMarket(), 15_000)
+    return () => clearInterval(refresh)
+  }, [loadMarket])
+
+  useEffect(() => {
+    let cancelled = false
+    let timeoutId: ReturnType<typeof setTimeout>
+
+    const scheduleWindowRotation = () => {
+      const delay = msUntilNextWindow(selection.interval) + 1500
+      timeoutId = setTimeout(async () => {
+        if (cancelled) return
+
+        marketSlugRef.current = null
+        setTrades([])
+        setConnected(false)
+        windowTsRef.current = getWindowTimestamp(selection.interval)
+
+        await loadMarket({ retry: true })
+
+        if (!cancelled) scheduleWindowRotation()
+      }, delay)
     }
-  }, [selection, loadMarket])
+
+    scheduleWindowRotation()
+    return () => {
+      cancelled = true
+      clearTimeout(timeoutId)
+    }
+  }, [selection.interval, loadMarket])
+
+  useEffect(() => {
+    const tick = () => {
+      const remaining = msUntilNextWindow(selection.interval)
+      setTimeRemainingMs(remaining)
+
+      const currentWindowTs = getWindowTimestamp(selection.interval)
+      if (
+        currentWindowTs !== windowTsRef.current &&
+        remaining <= 1000 &&
+        loadMarketRef.current
+      ) {
+        windowTsRef.current = currentWindowTs
+        marketSlugRef.current = null
+        setTrades([])
+        void loadMarketRef.current?.()
+      }
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [selection.interval])
 
   useEffect(() => {
     if (!market) return
 
+    const upTokenId = market.upTokenId
+    const downTokenId = market.downTokenId
     const ws = new MarketWsClient()
-    ws.setTokenOutcomes(market.upTokenId, market.downTokenId)
+
+    ws.setTokenOutcomes(upTokenId, downTokenId)
     ws.setHandlers({
       onConnect: () => setConnected(true),
       onDisconnect: () => setConnected(false),
       onBook: ({ assetId, bids, asks }) => {
         const snap = snapshotFromBook(bids, asks)
-        if (assetId === market.upTokenId) setUpBook(snap)
-        if (assetId === market.downTokenId) setDownBook(snap)
+        if (assetId === upTokenId) setUpBook(snap)
+        if (assetId === downTokenId) setDownBook(snap)
       },
       onPriceChange: ({ assetId, price, size, side }) => {
-        if (assetId === market.upTokenId) {
+        if (assetId === upTokenId) {
           setUpBook((prev) => (prev ? applyPriceChange(prev, price, size, side) : prev))
         }
-        if (assetId === market.downTokenId) {
+        if (assetId === downTokenId) {
           setDownBook((prev) => (prev ? applyPriceChange(prev, price, size, side) : prev))
         }
       },
       onTrade: (trade) => {
+        if (trade.assetId !== upTokenId && trade.assetId !== downTokenId) return
         setTrades((prev) => [trade, ...prev].slice(0, MAX_TRADES))
-        if (trade.assetId === market.upTokenId) {
+        if (trade.assetId === upTokenId) {
           setUpBook((prev) =>
             prev ? { ...prev, lastPrice: trade.price } : prev
           )
         }
-        if (trade.assetId === market.downTokenId) {
+        if (trade.assetId === downTokenId) {
           setDownBook((prev) =>
             prev ? { ...prev, lastPrice: trade.price } : prev
           )
@@ -143,7 +217,7 @@ export function useBtcMarketData() {
       },
     })
 
-    ws.connect([market.upTokenId, market.downTokenId])
+    ws.connect([upTokenId, downTokenId])
     return () => ws.disconnect()
   }, [market?.slug, market?.upTokenId, market?.downTokenId])
 
@@ -161,6 +235,7 @@ export function useBtcMarketData() {
     loading,
     error,
     whaleThreshold: WHALE_THRESHOLD_USD,
-    refresh: loadMarket,
+    timeRemainingMs,
+    refresh: () => loadMarket(),
   }
 }

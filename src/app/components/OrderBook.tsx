@@ -97,7 +97,7 @@ export function OrderBook({
   const bidBarTotal = getBarTotal(bids)
 
   return (
-    <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
+    <section className="flex h-full w-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card">
       <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-1.5">
         <div className="flex items-center gap-3">
           <span className="text-sm font-semibold">Order Book</span>

@@ -56,6 +56,7 @@ export class MarketWsClient {
   }
 
   setTokenOutcomes(upTokenId: string, downTokenId: string) {
+    this.tokenOutcome.clear()
     this.tokenOutcome.set(upTokenId, 'UP')
     this.tokenOutcome.set(downTokenId, 'DOWN')
   }
