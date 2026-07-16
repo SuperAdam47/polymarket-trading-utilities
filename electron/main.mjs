@@ -14,7 +14,6 @@ function createWindow() {
     title: 'BTC 5m Monitor',
     backgroundColor: '#15191d',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
